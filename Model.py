@@ -2,10 +2,10 @@ from tensorflow.keras import Model
 from tensorflow.keras.layers import Dense, Conv2D, Conv2DTranspose, Flatten, Activation, Reshape
 
 
-class Ex3Model(Model):
+class AEModel(Model):
 
     def __init__(self):
-        super(Ex3Model, self).__init__()
+        super(AEModel, self).__init__()
         # activations
         self.relu = Activation('relu')
         self.sigmoid = Activation('sigmoid')

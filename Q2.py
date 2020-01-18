@@ -10,7 +10,7 @@ plot_fsize = (20, 15)
 fcolor = 'white'
 
 
-def batch_data(x, y, batches=30):
+def batch_data_with_noise(x, y, batches=30):
     indices = np.arange(len(x))
     np.random.shuffle(indices)
     sx = x[indices]
@@ -59,7 +59,7 @@ def test_step(batch, model, test_loss):
 
 def q2(epochs=1000):
     (x_train, y_train), (x_test, y_test) = mnist.load_data()
-    training_x_batches, _ = batch_data(x_train, y_train)
+    training_x_batches, _ = batch_data_with_noise(x_train, y_train)
 
     plt.figure()
     plt.imshow(training_x_batches[0][0, :, :, 0], cmap='gray')

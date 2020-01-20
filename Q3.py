@@ -5,7 +5,7 @@ import tensorflow as tf
 import numpy as np
 
 
-class Generator:
+class Generator(Model):
     def __init__(self):
         super(Generator, self).__init__()
         # activations
@@ -50,21 +50,6 @@ class Discriminator(Model):
         return y
 
 
-class GANModel(Model):
-
-    def __init__(self):
-        super(GANModel, self).__init__()
-
-        self.generator = Generator()
-        self.discriminator = Discriminator()
-
-    def __call__(self, x, *args, **kwargs):
-        # TODO check later, might be wrong
-        y_gen = self.generator(x)
-        y_disc = self.discriminator(x)
-        return y_gen, y_disc
-
-
 def batch_data(x, y, batches=30):
     indices = np.arange(len(x))
     np.random.shuffle(indices)
@@ -103,40 +88,42 @@ def generator_loss(fake_output, loss_function):
     return loss_function(tf.ones_like(fake_output), fake_output)
 
 
+# @tf.function
 def train_step(batch, batch_noise, generator, discriminator, gen_optimizer, disc_optimizer):
 
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
-        generated_images = generator(batch_noise)
+        generated_images = generator(batch_noise, training=True)
 
-        real_output = discriminator(batch)
-        fake_output = discriminator(generated_images)
+        real_output = discriminator(batch, training=True)
+        fake_output = discriminator(generated_images, training=True)
 
-        gen_loss = generator_loss(fake_output, generator_loss)
-        disc_loss = discriminator_loss(real_output, fake_output, discriminator_loss)
+        gen_loss = generator_loss(fake_output, tf.keras.losses.BinaryCrossentropy(from_logits=True))
+        disc_loss = discriminator_loss(real_output, fake_output, tf.keras.losses.BinaryCrossentropy(from_logits=True))
 
-    gradients_of_generator = gen_tape.gradient(gen_loss)
-    gradients_of_discriminator = disc_tape.gradient(disc_loss)
+    gradients_of_generator = gen_tape.gradient(gen_loss, generator.trainable_variables)
+    gradients_of_discriminator = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
 
-    gen_optimizer.apply_gradients(gradients_of_generator)
-    disc_optimizer.apply_gradients(gradients_of_discriminator)
+    gen_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
+    disc_optimizer.apply_gradients(zip(gradients_of_discriminator, discriminator.trainable_variables))
 
 
 def q3(epochs=1000):
 
     discriminator = Discriminator()
     generator = Generator()
-    gan = GANModel()
     generator_optimizer = tf.keras.optimizers.Adam(1e-4)
     discriminator_optimizer = tf.keras.optimizers.Adam(1e-4)
     (x_train, y_train), (x_test, y_test) = mnist.load_data()
     training_x_batches, training_y_batches = batch_data(x_train, y_train)
     test_x_batches, test_y_batches = batch_data(x_test, y_test)
     batch_size = len(training_x_batches[0])
-    noise_dim = 100
+    noise_dim = 10
 
     for epoch in range(epochs):
+
         for batch in training_x_batches:
             noise = tf.random.normal([batch_size, noise_dim])
-            train_step(batch, noise, generator, discriminator, generator_optimizer, discriminator_optimizer, )
+            train_step(batch, noise, generator, discriminator, generator_optimizer, discriminator_optimizer)
 
-
+if __name__ == '__main__':
+    q3(epochs=1)

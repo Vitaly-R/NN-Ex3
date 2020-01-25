@@ -3,51 +3,44 @@ from tensorflow.keras.layers import Dense, Conv2D, Conv2DTranspose, Flatten, Act
 from tensorflow.keras.datasets import mnist
 import tensorflow as tf
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 class Generator(Model):
     def __init__(self):
         super(Generator, self).__init__()
-        # activations
-        self.relu = Activation('relu')
-        self.sigmoid = Activation('sigmoid')
 
-        self.dense3 = Dense(512)
-        self.dense4 = Dense(7 * 7 * 64)
+        self.dense1 = Dense(512, activation='relu')
+        self.dense2 = Dense(3136, activation='relu')
         self.reshape = Reshape((7, 7, 64))
-        self.convt1 = Conv2DTranspose(32, 2, 2, padding='valid')
-        self.convt2 = Conv2DTranspose(1, 2, 2, padding='valid')
+        self.tconv1 = Conv2DTranspose(32, 3, (2, 2), activation='relu', padding='same')
+        self.tconv2 = Conv2DTranspose(1, 3, (2, 2), activation='sigmoid', padding='same')
 
     def __call__(self, x, *args, **kwargs):
-        y = self.relu(self.dense3(x))
-        y = self.relu(self.dense4(y))
+        y = self.dense1(x)
+        y = self.dense2(y)
         y = self.reshape(y)
-        y = self.relu(self.convt1(y))
-        y = self.convt2(y)
-        return self.sigmoid(y)
+        y = self.tconv1(y)
+        return self.tconv2(y)
 
 
 class Discriminator(Model):
 
     def __init__(self):
         super(Discriminator, self).__init__()
-        # activations
-        self.relu = Activation('relu')
-        self.sigmoid = Activation('sigmoid')
 
-        self.conv1 = Conv2D(32, 3, 2, 'valid')
-        self.conv2 = Conv2D(64, 3, 2, 'valid')
+        self.conv1 = Conv2D(32, 3, (2, 3), padding='valid', activation='relu')
+        self.conv2 = Conv2D(64, 3, (2, 2), padding='valid', activation='relu')
         self.flatten = Flatten()
-        self.dense1 = Dense(512)
-        self.dense2 = Dense(1)  # classify as real
+        self.dense1 = Dense(512, activation='relu')
+        self.dense2 = Dense(1, activation='relu')
 
     def __call__(self, x, *args, **kwargs):
-        y = self.relu(self.conv1(x))
-        y = self.relu(self.conv2(y))
+        y = self.conv1(x)
+        y = self.conv2(y)
         y = self.flatten(y)
-        y = self.relu(self.dense1(y))
-        y = self.relu(self.dense2(y))
-        return y
+        y = self.dense1(y)
+        return self.dense2(y)
 
 
 def batch_data(x, y, batches=30):
@@ -88,7 +81,7 @@ def generator_loss(fake_output, loss_function):
     return loss_function(tf.ones_like(fake_output), fake_output)
 
 
-# @tf.function
+@tf.function
 def train_step(batch, batch_noise, generator, discriminator, gen_optimizer, disc_optimizer):
 
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
@@ -124,6 +117,13 @@ def q3(epochs=1000):
         for batch in training_x_batches:
             noise = tf.random.normal([batch_size, noise_dim])
             train_step(batch, noise, generator, discriminator, generator_optimizer, discriminator_optimizer)
+
+    test_input = tf.random.normal([1, 10])
+
+    pred = generator(test_input)
+    pred = pred[0, :, :, 0]
+    plt.imshow(pred, cmap='gray')
+    plt.show()
 
 if __name__ == '__main__':
     q3(epochs=1)

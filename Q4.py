@@ -1,33 +1,29 @@
 from tensorflow.keras import Model
-from tensorflow.keras.layers import Dense, Conv2D, Conv2DTranspose, Flatten, Activation, Reshape
+from tensorflow.keras.layers import Dense, Conv2D, Conv2DTranspose, Flatten, Activation, Reshape, Input
 from tensorflow.keras.datasets import mnist
 import tensorflow as tf
+
 import numpy as np
 import matplotlib.pyplot as plt
 
 
 class GLO(Model):
-
     def __init__(self):
         super(GLO, self).__init__()
-        self.relu = Activation('relu')
-        self.sigmoid = Activation('sigmoid')
-
-        self.dense2 = Dense(10)
-        self.dense3 = Dense(512)
-        self.dense4 = Dense(7 * 7 * 64)
+        self.dense0 = Dense(10, activation='relu')
+        self.dense1 = Dense(512, activation='relu')
+        self.dense2 = Dense(3136, activation='relu')
         self.reshape = Reshape((7, 7, 64))
-        self.convt1 = Conv2DTranspose(32, 2, 2, padding='valid')
-        self.convt2 = Conv2DTranspose(1, 2, 2, padding='valid')
+        self.tconv1 = Conv2DTranspose(32, 3, (2, 2), activation='relu', padding='same')
+        self.tconv2 = Conv2DTranspose(1, 3, (2, 2), activation='sigmoid', padding='same')
 
     def __call__(self, x, *args, **kwargs):
-        y = self.relu(self.dense2(x))
-        y = self.relu(self.dense3(y))
-        y = self.relu(self.dense4(y))
+        y = self.dense0(x)
+        y = self.dense1(y)
+        y = self.dense2(y)
         y = self.reshape(y)
-        y = self.relu(self.convt1(y))
-        y = self.convt2(y)
-        return self.sigmoid(y)
+        y = self.tconv1(y)
+        return self.tconv2(y)
 
 
 def batch_data(x, y, batches=30):
@@ -56,15 +52,17 @@ def batch_data(x, y, batches=30):
     return x_batches, y_batches
 
 
-# @tf.function
+@tf.function
 def train_step(batch, noise, generator, generator_optimizer, loss_func):
-
-    with tf.GradientTape() as gen_tape:
+    with tf.GradientTape() as gen_tape, tf.GradientTape() as gen_z_tape:
         project_noise = project(noise)
+        gen_z_tape.watch([project_noise])
         reconstructions = generator(project_noise)
         loss = loss_func(batch, reconstructions)
 
+    gradients_z = gen_z_tape.gradient(loss, [project_noise, ])
     gradients = gen_tape.gradient(loss, generator.trainable_variables)
+
     generator_optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
 
 
@@ -95,9 +93,12 @@ def q4(epochs=1000):
 
     test_sample = tf.random_normal([1, 10])
 
-    pred = glo(test_sample)
-    plt.imshow(pred[0, :, :, 0], cmap='gray')
+    pred = glo(test_sample, training=False)
+    pred = pred[0, :, :, 0]
+    pred = pred.numpy()
+    plt.imshow(pred, cmap='gray')
     plt.show()
+
 
 if __name__ == '__main__':
     q4(epochs=1)

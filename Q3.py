@@ -1,5 +1,5 @@
 from tensorflow.keras import Model
-from tensorflow.keras.layers import Dense, Conv2D, Conv2DTranspose, Flatten, Activation, Reshape
+from tensorflow.keras.layers import Dense, Conv2D, Conv2DTranspose, Flatten, Activation, Reshape, Dropout, BatchNormalization
 from tensorflow.keras.datasets import mnist
 import tensorflow as tf
 import numpy as np
@@ -10,36 +10,44 @@ class Generator(Model):
     def __init__(self):
         super(Generator, self).__init__()
 
-        self.dense1 = Dense(512, activation='relu')
+        self.dense1 = Dense(512)
+        self.relu1 = Activation('relu')
         self.dense2 = Dense(3136, activation='relu')
         self.reshape = Reshape((7, 7, 64))
-        self.tconv1 = Conv2DTranspose(32, 3, (2, 2), activation='relu', padding='same')
+        self.tconv1 = Conv2DTranspose(32, 3, (2, 2), padding='same')
+
         self.tconv2 = Conv2DTranspose(1, 3, (2, 2), activation='sigmoid', padding='same')
+
+        self.batch_norm1 = BatchNormalization()
+        self.batch_norm2 = BatchNormalization()
 
     def __call__(self, x, *args, **kwargs):
         y = self.dense1(x)
+        y = self.batch_norm1(y)
         y = self.dense2(y)
         y = self.reshape(y)
         y = self.tconv1(y)
+        y = self.batch_norm2(y)
+        y = self.relu1(y)
         return self.tconv2(y)
 
 
 class Discriminator(Model):
-
     def __init__(self):
         super(Discriminator, self).__init__()
 
         self.conv1 = Conv2D(32, 3, (2, 3), padding='valid', activation='relu')
         self.conv2 = Conv2D(64, 3, (2, 2), padding='valid', activation='relu')
         self.flatten = Flatten()
-        self.dense1 = Dense(512, activation='relu')
         self.dense2 = Dense(1, activation='relu')
+        self.dropout = Dropout(0.3)
 
     def __call__(self, x, *args, **kwargs):
         y = self.conv1(x)
+        y = self.dropout(y)
         y = self.conv2(y)
+        y = self.dropout(y)
         y = self.flatten(y)
-        y = self.dense1(y)
         return self.dense2(y)
 
 
@@ -83,7 +91,6 @@ def generator_loss(fake_output, loss_function):
 
 @tf.function
 def train_step(batch, batch_noise, generator, discriminator, gen_optimizer, disc_optimizer):
-
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
         generated_images = generator(batch_noise, training=True)
 
@@ -101,7 +108,6 @@ def train_step(batch, batch_noise, generator, discriminator, gen_optimizer, disc
 
 
 def q3(epochs=1000):
-
     discriminator = Discriminator()
     generator = Generator()
     generator_optimizer = tf.keras.optimizers.Adam(1e-4)
@@ -109,21 +115,25 @@ def q3(epochs=1000):
     (x_train, y_train), (x_test, y_test) = mnist.load_data()
     training_x_batches, training_y_batches = batch_data(x_train, y_train)
     test_x_batches, test_y_batches = batch_data(x_test, y_test)
-    batch_size = len(training_x_batches[0])
-    noise_dim = 10
+    latent_dim = 10
 
-    for epoch in range(epochs):
+    for epoch in range(1, epochs + 1):
+
+        if epoch == 1 or (epoch % 10 == 0):
+            print("epoch " + str(epoch) + " out of " + str(epochs))
 
         for batch in training_x_batches:
-            noise = tf.random.normal([batch_size, noise_dim])
+            noise = tf.random.normal([batch.shape[0], latent_dim])
             train_step(batch, noise, generator, discriminator, generator_optimizer, discriminator_optimizer)
 
     test_input = tf.random.normal([1, 10])
 
     pred = generator(test_input)
     pred = pred[0, :, :, 0]
+    pred = pred.numpy()
     plt.imshow(pred, cmap='gray')
     plt.show()
 
+
 if __name__ == '__main__':
-    q3(epochs=1)
+    q3(epochs=100)

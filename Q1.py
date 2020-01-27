@@ -1,11 +1,16 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from Model import plot_losses, project_2d
+from Model import Autoencoder, plot_losses, project_2d
 
 
 def display_reconstruction_examples(model, images):
-    fig = plt.figure(figsize=(20, 4))
+    """
+    Displays an image reconstruction example of the given images by the given model.
+    :param model: An autoencoder model which reconstructs images.
+    :param images: An array of images which will be used as an example.
+    """
+    fig = plt.figure()
     plt.title('Image Reconstruction Example')
     plt.ylabel('Reconstructed                Original      ')
     plt.xticks([])
@@ -24,30 +29,45 @@ def display_reconstruction_examples(model, images):
         i += 1
 
 
-def q1(epochs, model, training_images, test_images, test_labels, batch_size=500):
+def q1(training_images, test_images, test_labels, epochs=1000, batch_size=500):
+    """
+    Main function of question 1.
+    Trains the an autoencoder model to reconstruct images for the given number of epochs over the given dataset.
+    Then, plots the training and test losses, and generates a reconstruction example.
+    :param training_images: Set of training images.
+    :param test_images: Set of test images.
+    :param test_labels: Set of labels corresponding to the test images.
+    :param epochs: Number of epochs to train.
+    :param batch_size: Size of each batch of images for training and testing.
+    """
+    model = Autoencoder()
+    # Defining the optimizer and metrics for the model.
     optimizer = tf.keras.optimizers.Adam()
-    training_loss = tf.keras.metrics.Mean(name='training_loss')
-    test_loss = tf.keras.metrics.Mean(name='test_loss')
-    training_losses = list()
-    test_losses = list()
+    training_loss_metric = tf.keras.metrics.Mean()
+    test_loss_metric = tf.keras.metrics.Mean()
+    training_loss = list()
+    test_loss = list()
+    # Batching the data.
     training_batches = tf.data.Dataset.from_tensor_slices(training_images).batch(batch_size)
-    test_batches = tf.data.Dataset.from_tensor_slices((test_images, test_labels)).batch(batch_size)
+    test_batches = tf.data.Dataset.from_tensor_slices(test_images).batch(batch_size)
     for i in range(1, epochs + 1):
+        # Training loop.
         for batch in training_batches:
             with tf.GradientTape() as tape:
                 predictions = model(batch)
                 loss = tf.reduce_mean(tf.square(batch - predictions), axis=(1, 2))
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-            training_loss(loss)
-        training_losses.append(training_loss.result())
-        for (batch, _) in test_batches:
+            training_loss_metric(loss)
+        training_loss.append(training_loss_metric.result())
+        # Testing loop.
+        for batch in test_batches:
             predictions = model(batch)
             loss = tf.reduce_mean(tf.square(batch - predictions), axis=(1, 2))
-            test_loss(loss)
-        test_losses.append(test_loss.result())
-        print("epoch {}: training loss - {} | test loss - {}".format(i, training_losses[-1], test_losses[-1]))
-
-    plot_losses(training_losses, test_losses, 'Training and Test Loss\nafter {} epochs'.format(epochs))
+            test_loss_metric(loss)
+        test_loss.append(test_loss_metric.result())
+        print("epoch {}: training loss - {} | test loss - {}".format(i, training_loss[-1], test_loss[-1]))
+    # Plotting losses, displaying an example, and showing projection of latent vectors to 2D.
+    plot_losses(training_loss, test_loss, 'Training and Test Loss\nafter {} epochs'.format(epochs))
     display_reconstruction_examples(model, test_images[:10])
     project_2d(model, test_images, test_labels, 'Projection of Latent Vectors of Image Reconstruction to 2D With PCA\nafter {} epochs'.format(epochs))

@@ -1,139 +1,82 @@
-from tensorflow.keras import Model
-from tensorflow.keras.layers import Dense, Conv2D, Conv2DTranspose, Flatten, Activation, Reshape, Dropout, BatchNormalization
-from tensorflow.keras.datasets import mnist
+from Model import get_discriminator_model, get_generator_model, plot_losses
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 
 
-class Generator(Model):
-    def __init__(self):
-        super(Generator, self).__init__()
-
-        self.dense1 = Dense(512)
-        self.relu1 = Activation('relu')
-        self.dense2 = Dense(3136, activation='relu')
-        self.reshape = Reshape((7, 7, 64))
-        self.tconv1 = Conv2DTranspose(32, 3, (2, 2), padding='same')
-
-        self.tconv2 = Conv2DTranspose(1, 3, (2, 2), activation='sigmoid', padding='same')
-
-        self.batch_norm1 = BatchNormalization()
-        self.batch_norm2 = BatchNormalization()
-
-    def __call__(self, x, *args, **kwargs):
-        y = self.dense1(x)
-        y = self.batch_norm1(y)
-        y = self.dense2(y)
-        y = self.reshape(y)
-        y = self.tconv1(y)
-        y = self.batch_norm2(y)
-        y = self.relu1(y)
-        return self.tconv2(y)
+def display_generating_examples(generator, noise_dim):
+    """
+    Displays an example of generating images from the generator of a GAN model.
+    :param generator: A generator model which generates images from random noise vectors.
+    :param noise_dim: Dimension of the noise vectors.
+    """
+    fig = plt.figure()
+    plt.title('Image Generation Example by GAN')
+    plt.xticks([])
+    plt.yticks([])
+    noise = np.random.normal(size=(25, noise_dim)).astype('float32')
+    images = generator(noise)
+    for i in range(1, 26):
+        fig.add_subplot(5, 5, i)
+        plt.xticks([])
+        plt.yticks([])
+        plt.imshow(images[i - 1, :, :, 0], cmap='gray')
 
 
-class Discriminator(Model):
-    def __init__(self):
-        super(Discriminator, self).__init__()
-
-        self.conv1 = Conv2D(32, 3, (2, 3), padding='valid', activation='relu')
-        self.conv2 = Conv2D(64, 3, (2, 2), padding='valid', activation='relu')
-        self.flatten = Flatten()
-        self.dense2 = Dense(1, activation='relu')
-        self.dropout = Dropout(0.3)
-
-    def __call__(self, x, *args, **kwargs):
-        y = self.conv1(x)
-        y = self.dropout(y)
-        y = self.conv2(y)
-        y = self.dropout(y)
-        y = self.flatten(y)
-        return self.dense2(y)
-
-
-def batch_data(x, y, batches=30):
-    indices = np.arange(len(x))
-    np.random.shuffle(indices)
-    sx = x[indices]
-    sy = y[indices]
-    batch_size = indices.shape[0] // batches
-    x_batches = list()
-    y_batches = list()
-    for i in range(batches):
-        y_batch = np.array(sy[i * batch_size: (i + 1) * batch_size])
-        x_batch = np.array(sx[i * batch_size: (i + 1) * batch_size])
-        x_batch = x_batch.astype(np.float32)
-        mins = np.min(x_batch, axis=(1, 2))
-        mins = mins[..., np.newaxis, np.newaxis]
-        x_batch = x_batch - mins
-        maxes = x_batch.max(axis=(1, 2))
-        maxes = maxes[..., np.newaxis, np.newaxis]
-        x_batch = x_batch / maxes
-        if len(x_batch) < batch_size:
-            x_batch = np.concatenate(x_batch, sx[: batch_size - len(x_batch)])
-            y_batch = np.concatenate(y_batch, sy[: batch_size - len(x_batch)])
-        x_batches.append(x_batch[..., np.newaxis])
-        y_batches.append(y_batch)
-    return x_batches, y_batches
-
-
-def discriminator_loss(real_output, fake_output, loss_function):
-    real_loss = loss_function(tf.ones_like(real_output), real_output)
-    fake_loss = loss_function(tf.zeros_like(fake_output), fake_output)
-    total_loss = real_loss + fake_loss
-
-    return total_loss
-
-
-def generator_loss(fake_output, loss_function):
-    return loss_function(tf.ones_like(fake_output), fake_output)
-
-
-@tf.function
-def train_step(batch, batch_noise, generator, discriminator, gen_optimizer, disc_optimizer):
-    with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
-        generated_images = generator(batch_noise, training=True)
-
-        real_output = discriminator(batch, training=True)
-        fake_output = discriminator(generated_images, training=True)
-
-        gen_loss = generator_loss(fake_output, tf.keras.losses.BinaryCrossentropy(from_logits=True))
-        disc_loss = discriminator_loss(real_output, fake_output, tf.keras.losses.BinaryCrossentropy(from_logits=True))
-
-    gradients_of_generator = gen_tape.gradient(gen_loss, generator.trainable_variables)
-    gradients_of_discriminator = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
-
-    gen_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
-    disc_optimizer.apply_gradients(zip(gradients_of_discriminator, discriminator.trainable_variables))
-
-
-def q3(epochs=1000):
-    discriminator = Discriminator()
-    generator = Generator()
+def q3(training_images, epochs=200, noise_dim=100, batch_size=256):
+    """
+    The main function of question 3.
+    Trains a GAN to map random noise vectors to mnist digits such that a discriminator model will mistake the images as real.
+    :param training_images: An array of images to train over.
+    :param epochs: The number of epochs to train.
+    :param noise_dim: Dimension of the noise vectors which the generator gets as an input.
+    :param batch_size: Size of a single training batch.
+    """
+    # Shifting the images to range [-1, 1] and batching.
+    train_dataset = tf.data.Dataset.from_tensor_slices(2 * (training_images - 0.5)).batch(batch_size)
+    # Getting the discriminator and generator models.
+    discriminator = get_discriminator_model()
+    generator = get_generator_model()
+    # Defining the optimizers, loss function, and metrics.
     generator_optimizer = tf.keras.optimizers.Adam(1e-4)
     discriminator_optimizer = tf.keras.optimizers.Adam(1e-4)
-    (x_train, y_train), (x_test, y_test) = mnist.load_data()
-    training_x_batches, training_y_batches = batch_data(x_train, y_train)
-    test_x_batches, test_y_batches = batch_data(x_test, y_test)
-    latent_dim = 10
-
+    cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+    discriminator_loss_metric = tf.keras.metrics.Mean()
+    generator_loss_metric = tf.keras.metrics.Mean()
+    discriminator_loss = list()
+    generator_loss = list()
+    # Training loop.
     for epoch in range(1, epochs + 1):
-
-        if epoch == 1 or (epoch % 10 == 0):
-            print("epoch " + str(epoch) + " out of " + str(epochs))
-
-        for batch in training_x_batches:
-            noise = tf.random.normal([batch.shape[0], latent_dim])
-            train_step(batch, noise, generator, discriminator, generator_optimizer, discriminator_optimizer)
-
-    test_input = tf.random.normal([1, 10])
-
-    pred = generator(test_input)
-    pred = pred[0, :, :, 0]
-    pred = pred.numpy()
-    plt.imshow(pred, cmap='gray')
-    plt.show()
-
-
-if __name__ == '__main__':
-    q3(epochs=100)
+        for image_batch in train_dataset:
+            noise = tf.random.normal((batch_size, noise_dim))
+            with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
+                generated_images = generator(noise, training=True)
+                real_output = discriminator(image_batch, training=True)
+                fake_output = discriminator(generated_images, training=True)
+                generator_loss_val = cross_entropy(tf.ones_like(fake_output), fake_output)
+                discriminator_loss_val = cross_entropy(tf.ones_like(real_output), real_output) + cross_entropy(tf.zeros_like(fake_output), fake_output)
+            gradients_of_generator = gen_tape.gradient(generator_loss_val, generator.trainable_variables)
+            gradients_of_discriminator = disc_tape.gradient(discriminator_loss_val, discriminator.trainable_variables)
+            generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
+            discriminator_optimizer.apply_gradients(zip(gradients_of_discriminator, discriminator.trainable_variables))
+            discriminator_loss_metric(discriminator_loss_val)
+            generator_loss_metric(generator_loss_val)
+        discriminator_loss.append(discriminator_loss_metric.result())
+        generator_loss.append(generator_loss_metric.result())
+        print("epoch {} | Discriminator training loss - {} | Generator training loss - {}".format(epoch, discriminator_loss[-1], generator_loss[-1]))
+        # Visualizing the progress with 5 images
+        if (epoch in [1, epochs]) or (epochs < 10) or not (epoch % (epochs // 10)):
+            fig = plt.figure()
+            plt.title('GAN Training Progress Visualization \nepoch {}'.format(epoch))
+            plt.xticks([])
+            plt.yticks([])
+            noise = np.random.normal(size=(5, noise_dim)).astype('float32')
+            images = generator(noise)
+            for i in range(1, 6):
+                fig.add_subplot(1, 5, i)
+                plt.xticks([])
+                plt.yticks([])
+                plt.imshow(images[i - 1, :, :, 0], cmap='gray')
+    # Plotting losses, and displaying generation examples.
+    plot_losses(discriminator_loss, generator_loss, "Discriminator and Generator Training Loss \nafter {} epochs".format(epochs), "discriminator loss", "generator loss")
+    display_generating_examples(generator, noise_dim)

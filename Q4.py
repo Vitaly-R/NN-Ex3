@@ -1,112 +1,84 @@
-from tensorflow.keras import Model
-from tensorflow.keras.layers import Dense, Conv2D, Conv2DTranspose, Flatten, Activation, Reshape, Input
-from tensorflow.keras.datasets import mnist
+from Model import Decoder, plot_losses
 import tensorflow as tf
-
 import numpy as np
 import matplotlib.pyplot as plt
 
 
-class GLO(Model):
-    def __init__(self):
-        super(GLO, self).__init__()
-        self.dense0 = Dense(10, activation='relu')
-        self.dense1 = Dense(512, activation='relu')
-        self.dense2 = Dense(3136, activation='relu')
-        self.reshape = Reshape((7, 7, 64))
-        self.tconv1 = Conv2DTranspose(32, 3, (2, 2), activation='relu', padding='same')
-        self.tconv2 = Conv2DTranspose(1, 3, (2, 2), activation='sigmoid', padding='same')
-
-    def __call__(self, x, *args, **kwargs):
-        y = self.dense0(x)
-        y = self.dense1(y)
-        y = self.dense2(y)
-        y = self.reshape(y)
-        y = self.tconv1(y)
-        return self.tconv2(y)
-
-
-def batch_data(x, y, batches=30):
-    indices = np.arange(len(x))
-    np.random.shuffle(indices)
-    sx = x[indices]
-    sy = y[indices]
-    batch_size = indices.shape[0] // batches
-    x_batches = list()
-    y_batches = list()
-    for i in range(batches):
-        y_batch = np.array(sy[i * batch_size: (i + 1) * batch_size])
-        x_batch = np.array(sx[i * batch_size: (i + 1) * batch_size])
-        x_batch = x_batch.astype(np.float32)
-        mins = np.min(x_batch, axis=(1, 2))
-        mins = mins[..., np.newaxis, np.newaxis]
-        x_batch = x_batch - mins
-        maxes = x_batch.max(axis=(1, 2))
-        maxes = maxes[..., np.newaxis, np.newaxis]
-        x_batch = x_batch / maxes
-        if len(x_batch) < batch_size:
-            x_batch = np.concatenate(x_batch, sx[: batch_size - len(x_batch)])
-            y_batch = np.concatenate(y_batch, sy[: batch_size - len(x_batch)])
-        x_batches.append(x_batch[..., np.newaxis])
-        y_batches.append(y_batch)
-    return x_batches, y_batches
+def display_generating_examples(model, noise_vectors):
+    """
+    Displays an example of generating images from a GLO model.
+    :param model: The glo model which produces the images.
+    :param noise_vectors: The noise vectors which are mapped to mnist images.
+    """
+    fig = plt.figure()
+    plt.title('Image Generating Examples by a GLO model')
+    plt.xticks([])
+    plt.yticks([])
+    images = model(noise_vectors)[:5, :, :, :]
+    for i in range(1, len(noise_vectors) + 1):
+        fig.add_subplot(1, len(noise_vectors), i)
+        plt.xticks([])
+        plt.yticks([])
+        plt.imshow(images[i - 1, :, :, 0], cmap='gray')
 
 
-@tf.function
-def train_step(batch, noise, generator, generator_optimizer, loss_func):
-    with tf.GradientTape() as gen_tape, tf.GradientTape() as gen_z_tape:
-        project_noise = project(noise)
-        gen_z_tape.watch([project_noise])
-        reconstructions = generator(project_noise)
-        loss = loss_func(batch, reconstructions)
-
-    gradients_z = gen_z_tape.gradient(loss, [project_noise, ])
-    gradients = gen_tape.gradient(loss, generator.trainable_variables)
-
-    generator_optimizer.apply_gradients(zip(gradients, generator.trainable_variables))
-
-
-def glo_loss(batch, reconstructions):
-    return tf.reduce_mean(tf.square(batch - reconstructions))
-
-
-def project(batch, is_numpy=False):
-    if is_numpy:
-        return batch / np.sqrt(np.sum(batch ** 2, axis=1))[:, np.newaxis]
-    return batch / tf.sqrt(tf.reduce_sum(tf.square(batch), axis=1, keepdims=True))
-
-
-def q4(epochs=1000):
-    glo = GLO()
-    glo_optimizer = tf.keras.optimizers.Adam(1e-4)
-    (x_train, y_train), (x_test, y_test) = mnist.load_data()
-    training_x_batches, training_y_batches = batch_data(x_train, y_train)
-    latent_dim = 10
+def q4(training_images, epochs=1000, latent_dim=10, batch_size=500):
+    """
+    The main function of question 4.
+    Trains a GLO model to map vectors from the unit sphere in latent_dim-dimensions to mnist digits.
+    :param training_images: A training set of mnist digits whose distribution we attempt to learn.
+    :param epochs: Number of training epochs.
+    :param latent_dim: Dimension of the latent vectors in which we wish to learn the distribution.
+    :param batch_size: Size of a single batch in training.
+    """
+    model = Decoder()
+    # Creating noise vectors in latent_dim dimensions, and projecting them on the unit sphere.
+    noise_data = np.random.normal(size=(training_images.shape[0], latent_dim)).astype('float32')
+    noise_data = noise_data / (np.linalg.norm(noise_data, axis=1)[..., np.newaxis])
+    # Creating training batches.
+    training_batches = tf.data.Dataset.from_tensor_slices((training_images, noise_data)).batch(batch_size)
+    # Defining optimizers, and a loss metric.
+    z_optimizer = tf.keras.optimizers.Adam(1e-2)
+    glo_optimizer = tf.keras.optimizers.Adam(1e-3)
+    training_loss_metric = tf.keras.metrics.Mean()
+    training_loss = list()
+    shown = False
+    # Training loop.
     for epoch in range(1, epochs + 1):
+        for original_images_batch, noise_batch in training_batches:
+            # Representing the noise batch as a tensorflow variable so we could take the derivative of the loss w.r.t the batch.
+            noise_vector_batch = tf.Variable(noise_batch)
+            with tf.GradientTape() as z_tape, tf.GradientTape() as glo_tape:
+                generated_images_batch = model(noise_vector_batch)
+                z_loss = tf.square(tf.norm(original_images_batch - generated_images_batch, axis=1))
+                glo_loss = tf.reduce_mean(z_loss)
+            z_gradients = z_tape.gradient(z_loss, [noise_vector_batch, ])
+            z_optimizer.apply_gradients(zip(z_gradients, [noise_vector_batch, ]))
+            glo_gradients = glo_tape.gradient(glo_loss, model.trainable_variables)
+            glo_optimizer.apply_gradients(zip(glo_gradients, model.trainable_variables))
+            training_loss_metric(glo_loss)
+            # After applying the gradients, we need to update the original batch, which we want to train. We also project the resulting vectors to the unit sphere.
+            noise_batch = noise_vector_batch / (tf.norm(noise_vector_batch, axis=1)[..., tf.newaxis])
+            # Visualization of the progress is done using training data, and thus placed in the loop.
+            if not shown:
+                if (epoch in [1, epochs]) or (epochs < 5) or not (epoch % (epochs // 5)):
+                    fig = plt.figure()
+                    plt.title('GLO Training Progress Visualization \nepoch {}'.format(epoch))
+                    plt.xticks([])
+                    plt.yticks([])
+                    noise = noise_batch[: 3, :]
+                    images = model(noise)
+                    for i in range(1, 4):
+                        fig.add_subplot(1, 3, i)
+                        plt.xticks([])
+                        plt.yticks([])
+                        plt.imshow(images[i - 1, :, :, 0], cmap='gray')
+                    shown = True
+        training_loss.append(training_loss_metric.result())
+        shown = False
+        print("epoch {}: training loss - {} ".format(epoch, training_loss[-1]))
 
-        if epoch == 1 or (epoch % 10 == 0):
-            print("epoch " + str(epoch) + " out of " + str(epochs))
-
-        for batch in training_x_batches:
-            noise = tf.random.normal([batch.shape[0], latent_dim])
-            train_step(batch, noise, glo, glo_optimizer, glo_loss)
-
-    test_sample = tf.random_normal([1, 10])
-
-    pred = glo(test_sample, training=False)
-    pred = pred[0, :, :, 0]
-    pred = pred.numpy()
-    plt.imshow(pred, cmap='gray')
-    plt.show()
-
-
-if __name__ == '__main__':
-    q4(epochs=1)
-
-
-
-
-
-
-
-
+    plot_losses(training_loss, [])
+    for original_images_batch, noise_batch in training_batches:
+        display_generating_examples(model, noise_batch[:5, :])
+        break
